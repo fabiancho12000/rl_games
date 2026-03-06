@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Add saves
+saves/**
+!saves/.gitkeep
+
 # C extensions
 *.so
 

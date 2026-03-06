@@ -14,7 +14,7 @@ dependencies = [
     "gymnasium[box2d]>=1.2.3",
     "numpy>=2.4.2",
     "ruff>=0.15.5",
-    "stable-baselines3[extra]>=2.7.1",
+    "torch>=2.10.0",
 ]
 
 [project.scripts]

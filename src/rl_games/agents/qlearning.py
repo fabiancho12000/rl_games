@@ -6,7 +6,7 @@ from typing import Self
 import gymnasium as gym
 import numpy as np
 
-# Approximate observation bounds for LunarLander-v3.
+# Approximate observation bounds
 # Dims 0-5 are continuous; dims 6-7 are binary leg-contact flags.
 _OBS_BOUNDS = np.array(
     [
@@ -27,7 +27,7 @@ class QLearningAgent:
         self,
         env_id: str,
         *,
-        n_bins: int = 8,
+        n_bins: int = 10,
         lr: float = 0.1,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,

@@ -7,26 +7,14 @@ import numpy as np
 
 ENV_ID = "LunarLander-v3"
 SAVE_DIR = Path("saves")
-AGENT_CHOICES = ("qlearning", "dqn", "dqn_scratch")
+AGENT_CHOICES = ("qlearning", "dqn")
 VERSION = version("rl_games")
 
 
 def _save_path(agent_type: str) -> Path:
     if agent_type == "qlearning":
         return SAVE_DIR / "qlearning_lunar.pkl"
-    if agent_type == "dqn_scratch":
-        return SAVE_DIR / "dqn_scratch_lunar.pt"
-    return SAVE_DIR / "dqn_lunar"
-
-
-def _dqn_file(path: Path) -> Path:
-    """SB3 appends .zip automatically — return the actual file on disk."""
-    return path.with_suffix(".zip")
-
-
-def _actual_path(agent_type: str) -> Path:
-    path = _save_path(agent_type)
-    return _dqn_file(path) if agent_type == "dqn" else path
+    return SAVE_DIR / "dqn_lunar.pt"
 
 
 def _load_agent(agent_type: str):
@@ -34,11 +22,8 @@ def _load_agent(agent_type: str):
     if agent_type == "qlearning":
         from rl_games.agents.qlearning import QLearningAgent
         return QLearningAgent.load(path)
-    if agent_type == "dqn_scratch":
-        from rl_games.agents.dqn_scratch import DQNScratchAgent
-        return DQNScratchAgent.load(path)
     from rl_games.agents.dqn import DQNAgent
-    return DQNAgent.load(path, ENV_ID)
+    return DQNAgent.load(path)
 
 
 # ── commands ─────────────────────────────────────────────────────────
@@ -86,18 +71,14 @@ def cmd_inspect(args: argparse.Namespace) -> None:
 
 def cmd_init(args: argparse.Namespace) -> None:
     path = _save_path(args.agent)
-    actual = _actual_path(args.agent)
 
-    if actual.exists():
-        print(f"Save already exists at {actual}. Run 'rlgames delete {args.agent}' first.")
+    if path.exists():
+        print(f"Save already exists at {path}. Run 'rlgames delete {args.agent}' first.")
         return
 
     if args.agent == "qlearning":
         from rl_games.agents.qlearning import QLearningAgent
         agent = QLearningAgent(ENV_ID)
-    elif args.agent == "dqn_scratch":
-        from rl_games.agents.dqn_scratch import DQNScratchAgent
-        agent = DQNScratchAgent(ENV_ID)
     else:
         from rl_games.agents.dqn import DQNAgent
         agent = DQNAgent(ENV_ID)
@@ -108,46 +89,35 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 def cmd_train(args: argparse.Namespace) -> None:
     path = _save_path(args.agent)
-    actual = _actual_path(args.agent)
 
     if args.agent == "qlearning":
         from rl_games.agents.qlearning import QLearningAgent
-        agent = QLearningAgent.load(path) if actual.exists() else QLearningAgent(ENV_ID)
-        agent.train(total_episodes=args.episodes)
-        agent.save(path)
-
-    elif args.agent == "dqn_scratch":
-        from rl_games.agents.dqn_scratch import DQNScratchAgent
-        agent = DQNScratchAgent.load(path) if actual.exists() else DQNScratchAgent(ENV_ID)
+        agent = QLearningAgent.load(path) if path.exists() else QLearningAgent(ENV_ID)
         agent.train(total_episodes=args.episodes)
         agent.save(path)
 
     else:
         from rl_games.agents.dqn import DQNAgent
-        if actual.exists():
-            agent = DQNAgent.load(path, ENV_ID)
-            agent.set_env(ENV_ID)
-        else:
-            agent = DQNAgent(ENV_ID)
-        agent.train(total_timesteps=args.timesteps)
+        agent = DQNAgent.load(path) if path.exists() else DQNAgent(ENV_ID)
+        agent.train(total_episodes=args.episodes)
         agent.save(path)
 
     print("Training complete.")
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
-    actual = _actual_path(args.agent)
-    if actual.exists():
-        actual.unlink()
-        print(f"Deleted {actual}")
+    path = _save_path(args.agent)
+    if path.exists():
+        path.unlink()
+        print(f"Deleted {path}")
     else:
-        print(f"No save found at {actual}")
+        print(f"No save found at {path}")
 
 
 def cmd_load(args: argparse.Namespace) -> None:
-    actual = _actual_path(args.agent)
-    if not actual.exists():
-        print(f"No save found at {actual}")
+    path = _save_path(args.agent)
+    if not path.exists():
+        print(f"No save found at {path}")
         return
 
     agent = _load_agent(args.agent)
@@ -184,9 +154,9 @@ def _fmt_action(action: int) -> str:
 
 
 def cmd_sim(args: argparse.Namespace) -> None:
-    actual = _actual_path(args.agent)
-    if not actual.exists():
-        print(f"No save found at {actual}")
+    path = _save_path(args.agent)
+    if not path.exists():
+        print(f"No save found at {path}")
         return
 
     agent = _load_agent(args.agent)
@@ -247,9 +217,9 @@ def cmd_sim(args: argparse.Namespace) -> None:
 
 
 def cmd_render(args: argparse.Namespace) -> None:
-    actual = _actual_path(args.agent)
-    if not actual.exists():
-        print(f"No save found at {actual}")
+    path = _save_path(args.agent)
+    if not path.exists():
+        print(f"No save found at {path}")
         return
 
     agent = _load_agent(args.agent)
@@ -278,9 +248,9 @@ def cmd_version(_args: argparse.Namespace) -> None:
 def cmd_list(_args: argparse.Namespace) -> None:
     print("Available agents:\n")
     for agent in AGENT_CHOICES:
-        actual = _actual_path(agent)
-        status = "saved" if actual.exists() else "no save"
-        print(f"  {agent:<14} [{status}]  {actual}")
+        path = _save_path(agent)
+        status = "saved" if path.exists() else "no save"
+        print(f"  {agent:<14} [{status}]  {path}")
 
 
 # ── argument parser ──────────────────────────────────────────────────
@@ -318,8 +288,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # train
     p = sub.add_parser("train", help="Train an agent and save the result")
     p.add_argument("agent", choices=AGENT_CHOICES)
-    p.add_argument("--timesteps", type=int, default=100_000, help="DQN (SB3) training timesteps (default: 100k)")
-    p.add_argument("--episodes", type=int, default=10_000, help="Q-Learning / DQN-scratch training episodes (default: 10k)")
+    p.add_argument("--episodes", type=int, default=10_000, help="Training episodes (default: 10k)")
     p.set_defaults(func=cmd_train)
 
     # delete

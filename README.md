@@ -1,5 +1,5 @@
-![Lint](https://github.com/<user>/<repo>/actions/workflows/ci.yml/badge.svg?branch=main&event=push&job=Lint)
-![Build](https://github.com/<user>/<repo>/actions/workflows/ci.yml/badge.svg?branch=main&event=push&job=Build)
+![Lint](https://github.com/emiliomunozai/rl_games/actions/workflows/ci.yml/badge.svg?branch=main&event=push&job=Lint)
+![Build](https://github.com/emiliomunozai/rl_games/actions/workflows/ci.yml/badge.svg?branch=main&event=push&job=Build)
 # rl_games
 
 A hands-on repo for understanding how Reinforcement Learning works.
@@ -97,9 +97,7 @@ Training step (one gradient update):
 2. Compute targets: $y = r + \gamma \cdot \max_{a'} Q_{\text{target}}(s', a') \cdot (1 - \text{done})$.
 3. Minimise MSE between $Q_\theta(s, a)$ and $y$.
 
-> This repo provides **two** DQN variants:
-> - `dqn` — wraps [stable-baselines3](https://stable-baselines3.readthedocs.io/) for a production-grade implementation.
-> - `dqn_scratch` — a from-scratch PyTorch implementation where every component (network, replay buffer, training loop) is visible and editable.
+> See `src/rl_games/agents/dqn.py` for a from-scratch PyTorch implementation where every component (network, replay buffer, training loop) is visible and editable.
 
 ### Exploration vs. Exploitation
 
@@ -113,8 +111,7 @@ The $\varepsilon$-greedy schedule balances both: start with high $\varepsilon$ (
 | Agent | Algorithm | State representation | File |
 |---|---|---|---|
 | `qlearning` | Tabular Q-Learning | Discretized (8 bins per dim) | `agents/qlearning.py` |
-| `dqn` | DQN (stable-baselines3) | Raw continuous | `agents/dqn.py` |
-| `dqn_scratch` | DQN from scratch (PyTorch) | Raw continuous | `agents/dqn_scratch.py` |
+| `dqn` | DQN from scratch (PyTorch) | Raw continuous | `agents/dqn.py` |
 
 ## Setup
 
@@ -148,7 +145,6 @@ Show state/action spaces and sample a few random transitions to see what the age
 
 ```bash
 rlgames inspect                          # LunarLander-v3 (default)
-rlgames inspect --env CartPole-v1        # any Gymnasium env
 rlgames inspect --steps 10              # more sample transitions
 ```
 
@@ -156,7 +152,6 @@ rlgames inspect --steps 10              # more sample transitions
 
 ```bash
 rlgames init qlearning
-rlgames init dqn_scratch
 rlgames init dqn
 ```
 
@@ -165,9 +160,8 @@ rlgames init dqn
 Creates a save if none exists, resumes from an existing save otherwise.
 
 ```bash
-rlgames train qlearning   --episodes 20000
-rlgames train dqn         --timesteps 200000
-rlgames train dqn_scratch --episodes 500
+rlgames train qlearning --episodes 20000
+rlgames train dqn       --episodes 500
 ```
 
 ### Load a save and display info
@@ -175,7 +169,6 @@ rlgames train dqn_scratch --episodes 500
 ```bash
 rlgames load qlearning
 rlgames load dqn --eval
-rlgames load dqn_scratch --eval
 ```
 
 ### Simulate episodes (text output)
@@ -183,17 +176,16 @@ rlgames load dqn_scratch --eval
 Run a trained agent and see every action, reward, and outcome in the terminal.
 
 ```bash
-rlgames sim qlearning   --episodes 3              # full episodes
-rlgames sim dqn_scratch --episodes 2 --verbose     # full episodes with state vectors
-rlgames sim dqn         --episodes 5 --steps 10   # only first 10 steps per episode
+rlgames sim qlearning --episodes 3              # full episodes
+rlgames sim dqn       --episodes 2 --verbose    # full episodes with state vectors
+rlgames sim dqn       --episodes 5 --steps 10   # only first 10 steps per episode
 ```
 
 ### Render episodes (graphical window)
 
 ```bash
-rlgames render qlearning   --episodes 3
-rlgames render dqn         --episodes 3
-rlgames render dqn_scratch --episodes 3
+rlgames render qlearning --episodes 3
+rlgames render dqn       --episodes 3
 ```
 
 ### Delete a saved agent
@@ -201,7 +193,6 @@ rlgames render dqn_scratch --episodes 3
 ```bash
 rlgames delete qlearning
 rlgames delete dqn
-rlgames delete dqn_scratch
 ```
 
 ## Project structure
@@ -211,8 +202,7 @@ src/rl_games/
 ├── cli.py                  # CLI entry point
 └── agents/
     ├── qlearning.py        # Tabular Q-Learning agent
-    ├── dqn.py              # DQN agent (stable-baselines3 wrapper)
-    └── dqn_scratch.py      # DQN agent from scratch (PyTorch)
+    └── dqn.py              # DQN agent from scratch (PyTorch)
 ```
 
 Saves are written to `saves/` in the working directory.
