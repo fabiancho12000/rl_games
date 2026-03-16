@@ -27,12 +27,12 @@ class QLearningAgent:
         self,
         env_id: str,
         *,
-        n_bins: int = 10,
-        lr: float = 0.1,
+        n_bins: int = 6,
+        lr: float = 0.10,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
-        epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.9995,
+        epsilon_end: float = 0.05,
+        epsilon_decay: float = 0.9998,
     ) -> None:
         self.env_id = env_id
         self.n_bins = n_bins
@@ -89,9 +89,11 @@ class QLearningAgent:
         td_error = td_target - self.q_table[state][action]
         self.q_table[state][action] += self.lr * td_error
 
-    def train(self, total_episodes: int = 10_000, log_interval: int = 100) -> list[float]:
+    def train(self, total_episodes: int = 20_000, log_interval: int = 100) -> list[float]:
         env = gym.make(self.env_id)
         rewards_history: list[float] = []
+        best_reward = float("-inf")
+        best_avg = float("-inf")
 
         for episode in range(1, total_episodes + 1):
             obs, _ = env.reset()
@@ -99,30 +101,38 @@ class QLearningAgent:
             total_reward = 0.0
             done = False
 
-            # Environment loop
             while not done:
-                # Select action
                 action = self.select_action(state)
-                # Take action
+
                 next_obs, reward, terminated, truncated, _ = env.step(action)
-                # Update state
+                done = terminated or truncated
+
                 next_state = self.discretize(next_obs)
-                # Update Q-table
+
                 self._update(state, action, reward, next_state, done)
-                # Update state
+
                 state = next_state
-                # Update total reward
                 total_reward += reward
 
             self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
             self.training_episodes += 1
             rewards_history.append(total_reward)
 
+            if total_reward > best_reward:
+                best_reward = total_reward
+
+            if len(rewards_history) >= log_interval:
+                current_avg = float(np.mean(rewards_history[-log_interval:]))
+                if current_avg > best_avg:
+                    best_avg = current_avg
+
             if episode % log_interval == 0:
                 avg = np.mean(rewards_history[-log_interval:])
                 print(
                     f"Episode {episode}/{total_episodes} | "
                     f"Avg Reward: {avg:.2f} | "
+                    f"Best Reward: {best_reward:.2f} | "
+                    f"Best Avg({log_interval}): {best_avg:.2f} | "
                     f"Epsilon: {self.epsilon:.4f} | "
                     f"States visited: {len(self.q_table)}"
                 )
