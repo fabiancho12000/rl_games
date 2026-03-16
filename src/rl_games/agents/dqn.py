@@ -80,15 +80,17 @@ class DQNAgent:
         self,
         env_id: str,
         *,
-        lr: float = 1e-3,
+        lr: float = 5e-4,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
-        epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.995,
+        epsilon_end: float = 0.05,
+        epsilon_decay: float = 0.997,
         batch_size: int = 64,
         buffer_capacity: int = 100_000,
-        target_update_freq: int = 10,
+        target_update_freq: int = 1000,
         hidden: int = 128,
+        min_buffer_size: int = 5000,
+        train_freq: int = 4,
     ) -> None:
         self.env_id = env_id
         self.lr = lr
@@ -99,7 +101,10 @@ class DQNAgent:
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
+        self.min_buffer_size = min_buffer_size
+        self.train_freq = train_freq
         self.training_episodes = 0
+        self.total_steps = 0
 
         env = gym.make(env_id)
         self.state_dim = env.observation_space.shape[0]
@@ -111,9 +116,10 @@ class DQNAgent:
         self.q_net = QNetwork(self.state_dim, self.action_dim, hidden).to(self.device)
         self.target_net = QNetwork(self.state_dim, self.action_dim, hidden).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
+        self.target_net.eval()
 
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss()
         self.buffer = ReplayBuffer(buffer_capacity)
 
     # ── policy ────────────────────────────────────────────────────────
@@ -138,7 +144,7 @@ class DQNAgent:
 
         Returns the batch loss value.
         """
-        if len(self.buffer) < self.batch_size:
+        if len(self.buffer) < max(self.batch_size, self.min_buffer_size):
             return 0.0
 
         batch = self.buffer.sample(self.batch_size)
@@ -150,47 +156,52 @@ class DQNAgent:
         next_states_t = torch.FloatTensor(np.array(next_states)).to(self.device)
         dones_t = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
-        # Q(s, a) from the online network
         current_q = self.q_net(states_t).gather(1, actions_t)
 
-        # max_a' Q_target(s', a') from the frozen target network
         with torch.no_grad():
-            next_q = self.target_net(next_states_t).max(dim=1, keepdim=True).values
-
-        # Bellman target: r + γ * max Q(s', a') * (1 - done)
-        target_q = rewards_t + self.gamma * next_q * (1.0 - dones_t)
+            next_actions = self.q_net(next_states_t).argmax(dim=1, keepdim=True)
+            next_q = self.target_net(next_states_t).gather(1, next_actions)
+            target_q = rewards_t + self.gamma * next_q * (1.0 - dones_t)
 
         loss = self.loss_fn(current_q, target_q)
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), 10.0)
         self.optimizer.step()
 
-        return loss.item()
+        return float(loss.item())
 
     # ── training loop ─────────────────────────────────────────────────
 
-    def train(self, total_episodes: int = 500, log_interval: int = 10) -> list[float]:
+    def train(self, total_episodes: int = 1000, log_interval: int = 10) -> list[float]:
         env = gym.make(self.env_id)
         rewards_history: list[float] = []
+        best_reward = float("-inf")
+        best_avg = float("-inf")
 
         for episode in range(1, total_episodes + 1):
             obs, _ = env.reset()
             total_reward = 0.0
             done = False
+            episode_loss = []
 
-            # Environment loop
             while not done:
-                # Select action
                 action = self.select_action(obs)
-                # Take action
                 next_obs, reward, terminated, truncated, _ = env.step(action)
-                # Update state
                 done = terminated or truncated
-                # Update buffer
+
                 self.buffer.push(obs, action, float(reward), next_obs, done)
-                # Update Q-network
-                self._learn()
-                # Update state and total reward
+
+                self.total_steps += 1
+
+                if self.total_steps % self.train_freq == 0:
+                    loss = self._learn()
+                    if loss > 0:
+                        episode_loss.append(loss)
+
+                if self.total_steps % self.target_update_freq == 0:
+                    self.target_net.load_state_dict(self.q_net.state_dict())
+
                 obs = next_obs
                 total_reward += reward
 
@@ -198,19 +209,41 @@ class DQNAgent:
             self.training_episodes += 1
             rewards_history.append(total_reward)
 
-            if episode % self.target_update_freq == 0:
-                self.target_net.load_state_dict(self.q_net.state_dict())
+            if total_reward > best_reward:
+                best_reward = total_reward
+
+            if len(rewards_history) >= log_interval:
+                current_avg = float(np.mean(rewards_history[-log_interval:]))
+                if current_avg > best_avg:
+                    best_avg = current_avg
 
             if episode % log_interval == 0:
                 avg = np.mean(rewards_history[-log_interval:])
+                mean_loss = float(np.mean(episode_loss)) if episode_loss else 0.0
                 print(
                     f"Episode {episode}/{total_episodes} | "
                     f"Avg Reward: {avg:.2f} | "
+                    f"Best Reward: {best_reward:.2f} | "
+                    f"Best Avg({log_interval}): {best_avg:.2f} | "
                     f"Epsilon: {self.epsilon:.4f} | "
-                    f"Buffer: {len(self.buffer)}"
+                    f"Buffer: {len(self.buffer)} | "
+                    f"Steps: {self.total_steps} | "
+                    f"Loss: {mean_loss:.4f}"
                 )
 
         env.close()
+
+        final_avg_100 = float(np.mean(rewards_history[-100:])) if len(rewards_history) >= 100 else float(np.mean(rewards_history))
+        final_avg_500 = float(np.mean(rewards_history[-500:])) if len(rewards_history) >= 500 else float(np.mean(rewards_history))
+
+        print("\nTraining finished")
+        print(f"Final Avg(100): {final_avg_100:.2f}")
+        print(f"Final Avg(500): {final_avg_500:.2f}")
+        print(f"Best Reward: {best_reward:.2f}")
+        print(f"Best Avg({log_interval}): {best_avg:.2f}")
+        print(f"Total steps: {self.total_steps}")
+        print(f"Replay buffer size: {len(self.buffer)}")
+
         return rewards_history
 
     # ── persistence ───────────────────────────────────────────────────
@@ -233,6 +266,9 @@ class DQNAgent:
             "epsilon_decay": self.epsilon_decay,
             "batch_size": self.batch_size,
             "target_update_freq": self.target_update_freq,
+            "min_buffer_size": self.min_buffer_size,
+            "train_freq": self.train_freq,
+            "total_steps": self.total_steps,
         }
         torch.save(data, path)
         print(f"Saved DQN agent to {path}")
@@ -249,11 +285,14 @@ class DQNAgent:
             epsilon_decay=data["epsilon_decay"],
             batch_size=data["batch_size"],
             target_update_freq=data["target_update_freq"],
+            min_buffer_size=data.get("min_buffer_size", 5000),
+            train_freq=data.get("train_freq", 4),
         )
         agent.q_net.load_state_dict(data["q_net_state"])
         agent.target_net.load_state_dict(data["target_net_state"])
         agent.optimizer.load_state_dict(data["optimizer_state"])
         agent.training_episodes = data["training_episodes"]
+        agent.total_steps = data.get("total_steps", 0)
         return agent
 
     def info(self) -> str:
@@ -265,6 +304,8 @@ class DQNAgent:
             f"  Epsilon           : {self.epsilon:.4f}\n"
             f"  LR / Gamma        : {self.lr} / {self.gamma}\n"
             f"  Batch size        : {self.batch_size}\n"
-            f"  Target update     : every {self.target_update_freq} episodes\n"
+            f"  Min buffer size   : {self.min_buffer_size}\n"
+            f"  Train frequency   : every {self.train_freq} steps\n"
+            f"  Target update     : every {self.target_update_freq} steps\n"
             f"  Device            : {self.device}"
         )
