@@ -16,8 +16,12 @@ _OBS_BOUNDS = np.array(
         [-5.0, 5.0],
         [-3.14, 3.14],
         [-5.0, 5.0],
-    ]
+    ],
+    dtype=np.float32,
 )
+
+_OBS_LOW = _OBS_BOUNDS[:, 0]
+_OBS_HIGH = _OBS_BOUNDS[:, 1]
 
 _N_ACTIONS = 4
 
@@ -44,10 +48,11 @@ class QLearningAgent:
         self.training_episodes = 0
 
         self._bins = [
-            np.linspace(lo, hi, n_bins + 1)[1:-1] for lo, hi in _OBS_BOUNDS
+            np.linspace(lo, hi, n_bins + 1, dtype=np.float32)[1:-1]
+            for lo, hi in _OBS_BOUNDS
         ]
         self.q_table: dict[tuple, np.ndarray] = defaultdict(
-            lambda: np.zeros(_N_ACTIONS)
+            lambda: np.zeros(_N_ACTIONS, dtype=np.float32)
         )
 
     # ------------------------------------------------------------------
@@ -55,15 +60,32 @@ class QLearningAgent:
     # ------------------------------------------------------------------
 
     def discretize(self, obs: np.ndarray) -> tuple:
-        continuous = np.clip(obs[:6], _OBS_BOUNDS[:, 0], _OBS_BOUNDS[:, 1])
-        indices = [int(np.digitize(continuous[i], self._bins[i])) for i in range(6)]
-        indices.append(int(obs[6]))
-        indices.append(int(obs[7]))
-        return tuple(indices)
+        cont = obs[:6]
+
+        indices = [
+            int(np.digitize(
+                _OBS_LOW[i] if cont[i] < _OBS_LOW[i]
+                else _OBS_HIGH[i] if cont[i] > _OBS_HIGH[i]
+                else cont[i],
+                self._bins[i]
+            ))
+            for i in range(6)
+        ]
+
+        return (
+            indices[0],
+            indices[1],
+            indices[2],
+            indices[3],
+            indices[4],
+            indices[5],
+            int(obs[6]),
+            int(obs[7]),
+        )
 
     def select_action(self, state: tuple, *, deterministic: bool = False) -> int:
         if not deterministic and np.random.random() < self.epsilon:
-            return np.random.randint(_N_ACTIONS)
+            return int(np.random.randint(_N_ACTIONS))
         return int(np.argmax(self.q_table[state]))
 
     def predict(
@@ -84,37 +106,49 @@ class QLearningAgent:
         next_state: tuple,
         done: bool,
     ) -> None:
-        best_next = 0.0 if done else float(np.max(self.q_table[next_state]))
-        td_target = reward + self.gamma * best_next
-        td_error = td_target - self.q_table[state][action]
-        self.q_table[state][action] += self.lr * td_error
+        q_table = self.q_table
+        state_q = q_table[state]
 
-    def train(self, total_episodes: int = 20_000, log_interval: int = 100) -> list[float]:
+        best_next = 0.0 if done else float(np.max(q_table[next_state]))
+        td_target = reward + self.gamma * best_next
+        state_q[action] += self.lr * (td_target - state_q[action])
+
+    def train(
+        self,
+        total_episodes: int = 20_000,
+        log_interval: int = 100
+    ) -> list[float]:
         env = gym.make(self.env_id)
         rewards_history: list[float] = []
         best_reward = float("-inf")
         best_avg = float("-inf")
 
+        discretize = self.discretize
+        select_action = self.select_action
+        update = self._update
+        q_table = self.q_table
+        epsilon_end = self.epsilon_end
+        epsilon_decay = self.epsilon_decay
+
         for episode in range(1, total_episodes + 1):
             obs, _ = env.reset()
-            state = self.discretize(obs)
+            state = discretize(obs)
             total_reward = 0.0
             done = False
 
             while not done:
-                action = self.select_action(state)
+                action = select_action(state)
 
                 next_obs, reward, terminated, truncated, _ = env.step(action)
                 done = terminated or truncated
 
-                next_state = self.discretize(next_obs)
-
-                self._update(state, action, reward, next_state, done)
+                next_state = discretize(next_obs)
+                update(state, action, reward, next_state, done)
 
                 state = next_state
                 total_reward += reward
 
-            self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+            self.epsilon = max(epsilon_end, self.epsilon * epsilon_decay)
             self.training_episodes += 1
             rewards_history.append(total_reward)
 
@@ -122,19 +156,20 @@ class QLearningAgent:
                 best_reward = total_reward
 
             if len(rewards_history) >= log_interval:
-                current_avg = float(np.mean(rewards_history[-log_interval:]))
+                recent = rewards_history[-log_interval:]
+                current_avg = float(np.mean(recent))
                 if current_avg > best_avg:
                     best_avg = current_avg
 
             if episode % log_interval == 0:
-                avg = np.mean(rewards_history[-log_interval:])
+                avg = float(np.mean(rewards_history[-log_interval:]))
                 print(
                     f"Episode {episode}/{total_episodes} | "
                     f"Avg Reward: {avg:.2f} | "
                     f"Best Reward: {best_reward:.2f} | "
                     f"Best Avg({log_interval}): {best_avg:.2f} | "
                     f"Epsilon: {self.epsilon:.4f} | "
-                    f"States visited: {len(self.q_table)}"
+                    f"States visited: {len(q_table)}"
                 )
 
         env.close()
@@ -176,7 +211,8 @@ class QLearningAgent:
             epsilon_decay=data["epsilon_decay"],
         )
         agent.q_table = defaultdict(
-            lambda: np.zeros(_N_ACTIONS), data["q_table"]
+            lambda: np.zeros(_N_ACTIONS, dtype=np.float32),
+            data["q_table"]
         )
         agent.training_episodes = data["training_episodes"]
         return agent
